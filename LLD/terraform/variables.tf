@@ -46,3 +46,41 @@ variable "tags" {
     managed-by  = "terraform"
   }
 }
+
+variable "environment" {
+  description = "Environment name used in resource tags"
+  type        = string
+  default     = "poc"
+}
+
+variable "project" {
+  description = "Project name for tagging"
+  type        = string
+  default     = "genai-llm-aks"
+}
+
+variable "owner" {
+  description = "Owner name for tagging"
+  type        = string
+  default     = "sarath-babu"
+}
+
+variable "azure_openai_api_key" {
+  description = "Azure OpenAI API key for GPT-4o fallback"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "dockerhub_token" {
+  description = "DockerHub access token for image pulls"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "vm_size" {
+  description = "VM size for AKS node pools"
+  type        = string
+  default     = "Standard_D2s_v7"
+}

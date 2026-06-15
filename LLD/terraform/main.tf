@@ -109,7 +109,7 @@ resource "azurerm_kubernetes_cluster" "genai" {
   # System Node Pool (Required)
   default_node_pool {
     name                        = "systempool"
-    vm_size                     = "Standard_B2s"
+    vm_size                     = "Standard_D2s_v7"
     node_count                  = 1
     min_count                   = 1
     max_count                   = 2
@@ -152,10 +152,6 @@ resource "azurerm_kubernetes_cluster" "genai" {
   }
 
   # Azure AD + RBAC
-  azure_active_directory_role_based_access_control {
-    managed                = true
-    azure_rbac_enabled     = true
-  }
 
   # Workload Identity
   workload_identity_enabled         = true
@@ -192,7 +188,7 @@ resource "azurerm_kubernetes_cluster" "genai" {
 resource "azurerm_kubernetes_cluster_node_pool" "ai_workload" {
   name                  = "aiworkload"
   kubernetes_cluster_id = azurerm_kubernetes_cluster.genai.id
-  vm_size               = "Standard_B2s"
+  vm_size               = "Standard_D2s_v7"
   min_count             = 1
   max_count             = 3
   enable_auto_scaling   = true
