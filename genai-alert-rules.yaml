@@ -1,0 +1,218 @@
+# =============================================================================
+# Prometheus Alerting Rules - GenAI RAG Pipeline
+# =============================================================================
+
+groups:
+  - name: genai.rag.alerts
+    interval: 30s
+    rules:
+
+      # ── Availability ──────────────────────────────────
+      - alert: RAGAPIDown
+        expr: up{job="rag-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: genai-ops
+        annotations:
+          summary: "RAG API is down"
+          description: "RAG API pod {{ $labels.pod }} has been down for > 1 minute"
+          runbook: "https://github.com/esarath/genai-aks-poc/wiki/runbooks/rag-api-down"
+
+      - alert: QdrantDown
+        expr: up{job="qdrant"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: genai-ops
+        annotations:
+          summary: "Qdrant Vector DB is unreachable"
+          description: "Qdrant has been down for > 2 minutes. RAG pipeline will fail."
+
+      - alert: LLMGatewayDown
+        expr: up{job="llm-gateway"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "LLM Gateway (LiteLLM) is down"
+          description: "All LLM inference will fail. Check Ollama pods."
+
+      # ── Latency ───────────────────────────────────────
+      - alert: RAGHighLatencyP99
+        expr: |
+          histogram_quantile(0.99,
+            rate(rag_request_duration_seconds_bucket{endpoint="/query"}[5m])
+          ) > 30
+        for: 5m
+        labels:
+          severity: warning
+          team: genai-ops
+        annotations:
+          summary: "RAG p99 latency > 30 seconds"
+          description: "99th percentile RAG latency is {{ $value | humanizeDuration }}. Check LLM performance."
+
+      - alert: LLMInferenceHighLatency
+        expr: |
+          histogram_quantile(0.95,
+            rate(rag_llm_inference_seconds_bucket[5m])
+          ) > 20
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "LLM inference p95 latency > 20s"
+          description: "Model {{ $labels.model }} p95 latency: {{ $value | humanizeDuration }}"
+
+      - alert: RetrievalHighLatency
+        expr: |
+          histogram_quantile(0.95,
+            rate(rag_retrieval_seconds_bucket[5m])
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Vector DB retrieval p95 latency > 1s"
+          description: "Qdrant retrieval is slow: {{ $value | humanizeDuration }}. Check index health."
+
+      # ── Error Rates ───────────────────────────────────
+      - alert: RAGHighErrorRate
+        expr: |
+          rate(rag_requests_total{status="error"}[5m]) /
+          rate(rag_requests_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "RAG API error rate > 5%"
+          description: "Error rate: {{ $value | humanizePercentage }}. Check logs."
+
+      - alert: RAGCriticalErrorRate
+        expr: |
+          rate(rag_requests_total{status="error"}[5m]) /
+          rate(rag_requests_total[5m]) > 0.25
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "RAG API error rate > 25% — CRITICAL"
+          description: "High error rate: {{ $value | humanizePercentage }}. Immediate investigation required."
+
+      # ── Throughput ────────────────────────────────────
+      - alert: RAGNoRequests
+        expr: rate(rag_requests_total[10m]) == 0
+        for: 15m
+        labels:
+          severity: info
+        annotations:
+          summary: "No RAG requests for 15 minutes"
+          description: "RAG API has received no requests. Service may be unused or unreachable."
+
+      - alert: RAGHighActiveQueries
+        expr: rag_active_queries > 20
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High concurrent RAG queries: {{ $value }}"
+          description: "{{ $value }} active queries. Consider scaling up RAG API pods."
+
+      # ── Retrieval Quality ─────────────────────────────
+      - alert: LowRetrievalQuality
+        expr: |
+          histogram_quantile(0.50,
+            rate(rag_retrieval_score_bucket[15m])
+          ) < 0.6
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low RAG retrieval quality (median score < 0.6)"
+          description: "Median similarity score: {{ $value }}. Knowledge base may need reindexing."
+
+      # ── AKS Node Health ───────────────────────────────
+      - alert: AKSNodeNotReady
+        expr: kube_node_status_condition{condition="Ready",status="true"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "AKS node {{ $labels.node }} is not ready"
+          description: "Node has been not-ready for > 5 minutes."
+
+      - alert: GenAIPodCrashLooping
+        expr: |
+          rate(kube_pod_container_status_restarts_total{
+            namespace=~"genai-.*"
+          }[15m]) * 60 * 15 > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "GenAI pod {{ $labels.pod }} crash looping"
+          description: "Pod restarted {{ $value }} times in 15m"
+
+      - alert: GenAIPodOOMKilled
+        expr: |
+          kube_pod_container_status_last_terminated_reason{
+            reason="OOMKilled",
+            namespace=~"genai-.*"
+          } == 1
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pod {{ $labels.pod }} OOMKilled in {{ $labels.namespace }}"
+          description: "Container {{ $labels.container }} exceeded memory limit. Increase resources."
+
+      # ── Token Economics ───────────────────────────────
+      - alert: HighTokenUsage
+        expr: |
+          rate(rag_tokens_total{type="completion"}[1h]) * 3600 > 100000
+        for: 15m
+        labels:
+          severity: info
+        annotations:
+          summary: "High token usage: {{ $value | humanize }} tokens/hr"
+          description: "Monitor Azure OpenAI costs if using fallback LLM."
+
+  - name: genai.capacity.alerts
+    rules:
+      - alert: AKSHighCPU
+        expr: |
+          (
+            sum by (node) (rate(node_cpu_seconds_total{mode!="idle"}[5m]))
+            /
+            sum by (node) (machine_cpu_cores)
+          ) * 100 > 85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Node {{ $labels.node }} CPU > 85%"
+          description: "Consider scaling up or optimizing LLM inference."
+
+      - alert: AKSHighMemory
+        expr: |
+          (
+            node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes
+          ) / node_memory_MemTotal_bytes * 100 > 90
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Node {{ $labels.node }} memory > 90%"
+          description: "Critical memory pressure. LLM models may be evicted."
+
+      - alert: QdrantStorageLow
+        expr: |
+          kubelet_volume_stats_available_bytes{
+            persistentvolumeclaim=~"qdrant-.*"
+          } / kubelet_volume_stats_capacity_bytes{
+            persistentvolumeclaim=~"qdrant-.*"
+          } * 100 < 15
+        labels:
+          severity: warning
+        annotations:
+          summary: "Qdrant PVC storage < 15% free"
+          description: "Vector database storage is running low. Clean old collections or expand PVC."
