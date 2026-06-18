@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+chroma_data/
+*.db
+*.sqlite3
+.env
+*.log
+tfplan
+.terraform/
+*.tfstate
+*.tfstate.backup
